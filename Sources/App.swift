@@ -89,9 +89,9 @@ struct Challenge: View {
     @EnvironmentObject var alarm: Alarm
     @State var stage = 0
     @State var solved = 0
-    @State var a = Int.random(in: 12...29)
-    @State var b = Int.random(in: 3...9)
-    @State var c = Int.random(in: 10...99)
+    @State var a = Int.random(in: 2...9)
+    @State var b = Int.random(in: 2...9)
+    @State var c = Int.random(in: 1...20)
     @State var answer = ""
     @State var shakes = 0
     @State var phrase = ""
@@ -106,7 +106,7 @@ struct Challenge: View {
                 TextField("Answer", text: $answer).keyboardType(.numberPad).textFieldStyle(.roundedBorder)
                 Button("Submit") {
                     if Int(answer) == a * b + c { solved += 1; if solved == 3 { stage = 1; startShake() } }
-                    answer = ""; a = .random(in: 12...29); b = .random(in: 3...9); c = .random(in: 10...99)
+                    answer = ""; a = .random(in: 2...9); b = .random(in: 2...9); c = .random(in: 1...20)
                 }
             } else if stage == 1 {
                 Text("Shake the phone hard").font(.title)
