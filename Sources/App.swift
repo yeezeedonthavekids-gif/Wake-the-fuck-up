@@ -9,7 +9,13 @@ let sounds = ["beep", "siren", "buzzer", "chirp"]
 @main
 struct WakeUpApp: App {
     @StateObject var alarm = Alarm()
-    var body: some Scene { WindowGroup { if alarm.ringing != nil { Challenge().environmentObject(alarm) } else { Setup().environmentObject(alarm) } } }
+    var body: some Scene {
+        WindowGroup {
+            Group { if alarm.ringing != nil { Challenge() } else { Setup() } }
+                .environmentObject(alarm)
+                .preferredColorScheme(.dark)
+        }
+    }
 }
 
 struct AlarmItem: Codable, Identifiable {
@@ -60,7 +66,7 @@ final class Alarm: ObservableObject {
         refresh()
     }
 
-    func delete(at offsets: IndexSet) { alarms.remove(atOffsets: offsets); refresh() }
+    func remove(_ id: UUID) { alarms.removeAll { $0.id == id }; refresh() }
 
     func preview(_ sound: String) {
         play(sound)
@@ -117,95 +123,6 @@ final class Alarm: ObservableObject {
         player?.stop()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
         refresh()
-    }
-}
-
-struct Setup: View {
-    @EnvironmentObject var alarm: Alarm
-    @State var time = Date()
-    @State var sound = "beep"
-    var body: some View {
-        NavigationView {
-            List {
-                Section("New alarm") {
-                    DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
-                    Picker("Sound", selection: $sound) { ForEach(sounds, id: \.self) { Text($0.capitalized) } }
-                    Button("Preview sound") { alarm.preview(sound) }
-                    Button("Add alarm") { alarm.add(time, sound: sound) }
-                }
-                Section(footer: Text("Alarms repeat daily. Keep the app open in the background (don't swipe it away) and volume up.")) {
-                    ForEach(alarm.alarms) { a in
-                        HStack {
-                            Text(Calendar.current.date(from: DateComponents(hour: a.hour, minute: a.minute)) ?? Date(), style: .time).font(.title2)
-                            Picker("", selection: Binding(get: { a.sound }, set: { alarm.setSound(a.id, $0) })) {
-                                ForEach(sounds, id: \.self) { Text($0.capitalized) }
-                            }.labelsHidden().pickerStyle(.menu)
-                            Spacer()
-                            Toggle("", isOn: Binding(get: { a.enabled }, set: { _ in alarm.toggle(a.id) })).labelsHidden()
-                        }
-                    }.onDelete { alarm.delete(at: $0) }
-                }
-            }.navigationTitle("Alarms")
-        }
-    }
-}
-
-struct Challenge: View {
-    @EnvironmentObject var alarm: Alarm
-    @State var stage = 0
-    @State var solved = 0
-    @State var a = Int.random(in: 2...9)
-    @State var b = Int.random(in: 2...9)
-    @State var c = Int.random(in: 1...20)
-    @State var answer = ""
-    @State var shakes = 0
-    @State var phrase = ""
-    @State var openSince: Date?
-    @State var openSecs = 0
-    @State var motion = CMMotionManager()
-    let target = "i am awake and getting up"
-
-    var body: some View {
-        VStack(spacing: 20) {
-            if stage == 0 {
-                Text("Math \(solved + 1)/3").font(.headline)
-                Text("\(a) × \(b) + \(c) = ?").font(.largeTitle)
-                TextField("Answer", text: $answer).keyboardType(.numberPad).textFieldStyle(.roundedBorder)
-                Button("Submit") {
-                    if Int(answer) == a * b + c { solved += 1; if solved == 3 { stage = 1; startShake() } }
-                    answer = ""; a = .random(in: 2...9); b = .random(in: 2...9); c = .random(in: 1...20)
-                }
-            } else if stage == 1 {
-                Text("Shake the phone hard").font(.title)
-                Text("\(shakes)/30").font(.largeTitle)
-            } else if stage == 2 {
-                Text("Look at the camera, eyes wide open").font(.title2)
-                Text("\(openSecs)/10").font(.largeTitle)
-                EyeCheck { open in
-                    guard open else { openSince = nil; openSecs = 0; return }
-                    let start = openSince ?? Date()
-                    openSince = start
-                    openSecs = min(10, Int(Date().timeIntervalSince(start)))
-                    if openSecs >= 10 { stage = 3 }
-                }.frame(height: 360).clipShape(RoundedRectangle(cornerRadius: 16))
-            } else {
-                Text("Type: \"\(target)\"")
-                TextField("", text: $phrase).textFieldStyle(.roundedBorder).autocorrectionDisabled().textInputAutocapitalization(.never)
-                Button("I'm up") { if phrase.lowercased().trimmingCharacters(in: .whitespaces) == target { alarm.stop() } }
-            }
-        }.padding()
-    }
-
-    func startShake() {
-        var last = Date.distantPast
-        motion.accelerometerUpdateInterval = 0.02
-        motion.startAccelerometerUpdates(to: .main) { d, _ in
-            guard let x = d?.acceleration else { return }
-            if sqrt(x.x * x.x + x.y * x.y + x.z * x.z) > 2.2, Date().timeIntervalSince(last) > 0.15 {
-                last = Date(); shakes += 1
-                if shakes >= 30 { motion.stopAccelerometerUpdates(); stage = ARFaceTrackingConfiguration.isSupported ? 2 : 3 }
-            }
-        }
     }
 }
 
