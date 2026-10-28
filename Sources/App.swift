@@ -3,85 +3,149 @@ import AVFoundation
 import UserNotifications
 import CoreMotion
 
+let sounds = ["beep", "siren", "buzzer", "chirp"]
+
 @main
 struct WakeUpApp: App {
     @StateObject var alarm = Alarm()
-    var body: some Scene { WindowGroup { if alarm.ringing { Challenge().environmentObject(alarm) } else { Setup().environmentObject(alarm) } } }
+    var body: some Scene { WindowGroup { if alarm.ringing != nil { Challenge().environmentObject(alarm) } else { Setup().environmentObject(alarm) } } }
+}
+
+struct AlarmItem: Codable, Identifiable {
+    var id = UUID()
+    var hour: Int
+    var minute: Int
+    var sound: String
+    var enabled = true
+    var next: Date?
 }
 
 final class Alarm: ObservableObject {
-    @Published var wakeTime: Date? = UserDefaults.standard.object(forKey: "wake") as? Date
-    @Published var ringing = false
+    @Published var alarms: [AlarmItem] = [] { didSet { UserDefaults.standard.set(try? JSONEncoder().encode(alarms), forKey: "alarms") } }
+    @Published var ringing: UUID?
     private var player: AVAudioPlayer?
     private var timer: Timer?
 
     init() {
+        if let d = UserDefaults.standard.data(forKey: "alarms"), let a = try? JSONDecoder().decode([AlarmItem].self, from: d) { alarms = a }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] _ in self?.player?.play() }
-        if wakeTime != nil { monitor() }
+        refresh()
     }
 
-    func arm(_ picked: Date) {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: picked)
-        let t = Calendar.current.nextDate(after: Date(), matching: c, matchingPolicy: .nextTime) ?? picked
-        wakeTime = t
-        UserDefaults.standard.set(t, forKey: "wake")
-        let nc = UNUserNotificationCenter.current()
-        nc.removeAllPendingNotificationRequests()
-        for i in 0..<60 {
-            let n = UNMutableNotificationContent()
-            n.title = "WAKE UP"; n.body = "Open the app and prove you're awake."
-            n.sound = UNNotificationSound(named: UNNotificationSoundName("alarm.wav"))
-            let trig = UNTimeIntervalNotificationTrigger(timeInterval: max(1, t.timeIntervalSinceNow + Double(i * 20)), repeats: false)
-            nc.add(UNNotificationRequest(identifier: "wake\(i)", content: n, trigger: trig))
+    static func nextDate(_ a: AlarmItem) -> Date {
+        Calendar.current.nextDate(after: Date(), matching: DateComponents(hour: a.hour, minute: a.minute), matchingPolicy: .nextTime) ?? Date()
+    }
+
+    func add(_ time: Date, sound: String) {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: time)
+        var a = AlarmItem(hour: c.hour ?? 7, minute: c.minute ?? 0, sound: sound)
+        a.next = Self.nextDate(a)
+        alarms.append(a)
+        alarms.sort { ($0.hour, $0.minute) < ($1.hour, $1.minute) }
+        refresh()
+    }
+
+    func toggle(_ id: UUID) {
+        guard let i = alarms.firstIndex(where: { $0.id == id }) else { return }
+        alarms[i].enabled.toggle()
+        alarms[i].next = alarms[i].enabled ? Self.nextDate(alarms[i]) : nil
+        refresh()
+    }
+
+    func setSound(_ id: UUID, _ sound: String) {
+        guard let i = alarms.firstIndex(where: { $0.id == id }) else { return }
+        alarms[i].sound = sound
+        refresh()
+    }
+
+    func delete(at offsets: IndexSet) { alarms.remove(atOffsets: offsets); refresh() }
+
+    func preview(_ sound: String) {
+        play(sound)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self, self.ringing == nil else { return }
+            self.player?.stop()
+            if self.alarms.contains(where: { $0.enabled }) { self.play("silence") }
         }
-        monitor()
     }
-
-    func disarm() { stop() }
 
     private func play(_ name: String) {
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: name == "silence" ? [.mixWithOthers] : [])
         try? AVAudioSession.sharedInstance().setActive(true)
-        player = try? AVAudioPlayer(contentsOf: Bundle.main.url(forResource: name, withExtension: "wav")!)
+        guard let url = Bundle.main.url(forResource: name, withExtension: "wav") else { return }
+        player = try? AVAudioPlayer(contentsOf: url)
         player?.numberOfLoops = -1; player?.volume = 1; player?.play()
     }
 
-    // Silent audio keeps the app alive in the background so it can ring at full volume.
-    private func monitor() {
-        play("silence")
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self, let w = self.wakeTime else { return }
-            if Date() >= w {
-                if !self.ringing { self.ringing = true; self.play("alarm") }
-                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    // Backup notifications in case the app gets killed, then silent audio keeps the app alive so it can ring at full volume.
+    private func refresh() {
+        let nc = UNUserNotificationCenter.current()
+        nc.removeAllPendingNotificationRequests()
+        let active = alarms.filter { $0.enabled && ($0.next ?? .distantPast) > Date() }
+        let per = active.isEmpty ? 0 : min(30, 60 / active.count)
+        for a in active {
+            for i in 0..<per {
+                let n = UNMutableNotificationContent()
+                n.title = "WAKE UP"; n.body = "Open the app and prove you're awake."
+                n.sound = UNNotificationSound(named: UNNotificationSoundName("\(a.sound).wav"))
+                let trig = UNTimeIntervalNotificationTrigger(timeInterval: a.next!.timeIntervalSinceNow + Double(i * 20), repeats: false)
+                nc.add(UNNotificationRequest(identifier: "\(a.id)-\(i)", content: n, trigger: trig))
             }
         }
+        timer?.invalidate()
+        guard alarms.contains(where: { $0.enabled }) else {
+            if ringing == nil { player?.stop(); try? AVAudioSession.sharedInstance().setActive(false) }
+            return
+        }
+        if ringing == nil { play("silence") }
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
+    }
+
+    private func tick() {
+        if ringing == nil, let a = alarms.first(where: { $0.enabled && ($0.next ?? .distantFuture) <= Date() }) {
+            ringing = a.id
+            play(a.sound)
+        }
+        if ringing != nil { AudioServicesPlaySystemSound(kSystemSoundID_Vibrate) }
     }
 
     func stop() {
-        timer?.invalidate(); player?.stop(); ringing = false; wakeTime = nil
-        UserDefaults.standard.removeObject(forKey: "wake")
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        if let i = alarms.firstIndex(where: { $0.id == ringing }) { alarms[i].next = Self.nextDate(alarms[i]) }
+        ringing = nil
+        player?.stop()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-        try? AVAudioSession.sharedInstance().setActive(false)
+        refresh()
     }
 }
 
 struct Setup: View {
     @EnvironmentObject var alarm: Alarm
     @State var time = Date()
+    @State var sound = "beep"
     var body: some View {
-        VStack(spacing: 20) {
-            DatePicker("Wake time", selection: $time, displayedComponents: .hourAndMinute).datePickerStyle(.wheel).labelsHidden()
-            Button("Set alarm") { alarm.arm(time) }.font(.title)
-            if let w = alarm.wakeTime {
-                Text("Set for \(w.formatted(date: .abbreviated, time: .shortened))")
-                Text("Don't swipe the app away. Volume up.").font(.caption)
-                Button("Cancel", role: .destructive) { alarm.disarm() }
-            }
-        }.padding()
+        NavigationView {
+            List {
+                Section("New alarm") {
+                    DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
+                    Picker("Sound", selection: $sound) { ForEach(sounds, id: \.self) { Text($0.capitalized) } }
+                    Button("Preview sound") { alarm.preview(sound) }
+                    Button("Add alarm") { alarm.add(time, sound: sound) }
+                }
+                Section(footer: Text("Alarms repeat daily. Keep the app open in the background (don't swipe it away) and volume up.")) {
+                    ForEach(alarm.alarms) { a in
+                        HStack {
+                            Text(Calendar.current.date(from: DateComponents(hour: a.hour, minute: a.minute)) ?? Date(), style: .time).font(.title2)
+                            Picker("", selection: Binding(get: { a.sound }, set: { alarm.setSound(a.id, $0) })) {
+                                ForEach(sounds, id: \.self) { Text($0.capitalized) }
+                            }.labelsHidden().pickerStyle(.menu)
+                            Spacer()
+                            Toggle("", isOn: Binding(get: { a.enabled }, set: { _ in alarm.toggle(a.id) })).labelsHidden()
+                        }
+                    }.onDelete { alarm.delete(at: $0) }
+                }
+            }.navigationTitle("Alarms")
+        }
     }
 }
 
