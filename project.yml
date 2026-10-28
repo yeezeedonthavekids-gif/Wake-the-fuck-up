@@ -14,6 +14,7 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         NSMotionUsageDescription: Shake to prove you're awake.
+        NSCameraUsageDescription: Checks your eyes are open to prove you're awake.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wakeup.alarm

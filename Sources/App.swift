@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import UserNotifications
 import CoreMotion
+import ARKit
 
 let sounds = ["beep", "siren", "buzzer", "chirp"]
 
@@ -159,6 +160,8 @@ struct Challenge: View {
     @State var answer = ""
     @State var shakes = 0
     @State var phrase = ""
+    @State var openSince: Date?
+    @State var openSecs = 0
     @State var motion = CMMotionManager()
     let target = "i am awake and getting up"
 
@@ -175,6 +178,16 @@ struct Challenge: View {
             } else if stage == 1 {
                 Text("Shake the phone hard").font(.title)
                 Text("\(shakes)/30").font(.largeTitle)
+            } else if stage == 2 {
+                Text("Look at the camera, eyes wide open").font(.title2)
+                Text("\(openSecs)/10").font(.largeTitle)
+                EyeCheck { open in
+                    guard open else { openSince = nil; openSecs = 0; return }
+                    let start = openSince ?? Date()
+                    openSince = start
+                    openSecs = min(10, Int(Date().timeIntervalSince(start)))
+                    if openSecs >= 10 { stage = 3 }
+                }.frame(height: 360).clipShape(RoundedRectangle(cornerRadius: 16))
             } else {
                 Text("Type: \"\(target)\"")
                 TextField("", text: $phrase).textFieldStyle(.roundedBorder).autocorrectionDisabled().textInputAutocapitalization(.never)
@@ -190,8 +203,34 @@ struct Challenge: View {
             guard let x = d?.acceleration else { return }
             if sqrt(x.x * x.x + x.y * x.y + x.z * x.z) > 2.2, Date().timeIntervalSince(last) > 0.15 {
                 last = Date(); shakes += 1
-                if shakes >= 30 { motion.stopAccelerometerUpdates(); stage = 2 }
+                if shakes >= 30 { motion.stopAccelerometerUpdates(); stage = ARFaceTrackingConfiguration.isSupported ? 2 : 3 }
             }
+        }
+    }
+}
+
+// Front TrueDepth camera: reports whether a face is tracked with both eyes fully open.
+struct EyeCheck: UIViewRepresentable {
+    var onUpdate: (Bool) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(onUpdate) }
+    func makeUIView(context: Context) -> ARSCNView {
+        let v = ARSCNView()
+        v.session.delegate = context.coordinator
+        v.session.run(ARFaceTrackingConfiguration())
+        return v
+    }
+    func updateUIView(_ v: ARSCNView, context: Context) {}
+    static func dismantleUIView(_ v: ARSCNView, coordinator: Coordinator) { v.session.pause() }
+
+    final class Coordinator: NSObject, ARSessionDelegate {
+        let onUpdate: (Bool) -> Void
+        init(_ f: @escaping (Bool) -> Void) { onUpdate = f }
+        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            guard let f = anchors.compactMap({ $0 as? ARFaceAnchor }).first else { return }
+            let l = f.blendShapes[.eyeBlinkLeft]?.floatValue ?? 1
+            let r = f.blendShapes[.eyeBlinkRight]?.floatValue ?? 1
+            let open = f.isTracked && l < 0.2 && r < 0.2
+            DispatchQueue.main.async { self.onUpdate(open) }
         }
     }
 }
