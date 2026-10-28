@@ -89,11 +89,13 @@ struct Challenge: View {
     @EnvironmentObject var alarm: Alarm
     @State var stage = 0
     @State var solved = 0
-    @State var a = Int.random(in: 12...29), b = Int.random(in: 3...9), c = Int.random(in: 10...99)
+    @State var a = Int.random(in: 12...29)
+    @State var b = Int.random(in: 3...9)
+    @State var c = Int.random(in: 10...99)
     @State var answer = ""
     @State var shakes = 0
     @State var phrase = ""
-    let motion = CMMotionManager()
+    @State var motion = CMMotionManager()
     let target = "i am awake and getting up"
 
     var body: some View {
