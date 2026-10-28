@@ -3,6 +3,8 @@ on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - run: python3 gen_sounds.py && brew install xcodegen && xcodegen generate
@@ -12,3 +14,9 @@ jobs:
         with:
           name: WakeUp-ipa
           path: WakeUp.ipa
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          files: WakeUp.ipa
+          make_latest: true
