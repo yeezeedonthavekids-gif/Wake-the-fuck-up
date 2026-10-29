@@ -37,14 +37,39 @@ final class AppModel: ObservableObject {
     private var fallbackTimer: Timer?
     private let notificationDelegate = NotificationDelegate()
 
-    init(persistence: Persistence = Persistence()) {
-        self.persistence = persistence
-        data = persistence.load()
+    /// Set by the `-WakeUpScreenshot <screen>` launch argument, used to capture screenshots in CI.
+    let screenshotScreen = UserDefaults.standard.string(forKey: "WakeUpScreenshot")
+
+    init(persistence: Persistence? = nil) {
+        let shot = UserDefaults.standard.string(forKey: "WakeUpScreenshot")
+        let store = persistence ?? (shot != nil
+            ? Persistence(directory: FileManager.default.temporaryDirectory.appendingPathComponent("screenshot-\(UUID().uuidString)"))
+            : Persistence())
+        self.persistence = store
+        data = shot.map(AppModel.screenshotData) ?? store.load()
         Haptics.enabled = data.prefs.haptics
         resetChecklistIfNewDay()
         notificationDelegate.model = self
         UNUserNotificationCenter.current().delegate = notificationDelegate
         scheduler.observeAlerts { [weak self] id in self?.systemAlarmAlerting(id) }
+    }
+
+    /// Sample settings for screenshots. Never used in normal launches.
+    private static func screenshotData(_ screen: String) -> AppData {
+        var d = AppData()
+        d.prefs.name = "Jackson"
+        d.prefs.showChecklist = true
+        d.onboardingDone = !screen.hasPrefix("onboarding")
+        d.onboardingStep = screen == "onboarding-look" ? OnboardingPage.firstWizardIndex
+            : screen == "onboarding-challenge" ? OnboardingPage.all.firstIndex(of: .challenge)! : 0
+        d.alarm.hour = 6
+        d.alarm.minute = 45
+        d.alarm.enabled = true
+        d.alarm.soundID = "gentle-chimes"
+        var squats = ChallengeStep(kind: .squats, difficulty: .easy)
+        squats.restSeconds = 10
+        d.alarm.steps = [ChallengeStep(kind: .math, difficulty: .medium), squats, ChallengeStep(kind: .typing)]
+        return d
     }
 
     private func persist() {
@@ -119,6 +144,10 @@ final class AppModel: ObservableObject {
     // MARK: App lifecycle
 
     func becameActive() {
+        if let screen = screenshotScreen {
+            if screen.hasPrefix("ringing"), ringing == nil { startRinging(isTest: true, scheduledFor: nil) }
+            return
+        }
         resetChecklistIfNewDay()
         if ringing == nil {
             if RingSignal.takeChallengeRequest(within: 30 * 60) {
@@ -179,7 +208,9 @@ final class AppModel: ObservableObject {
         guard ringing == nil else { return }
         let session = data.session
         Task { await scheduler.stopAlerting() }
-        audio.startRinging(currentSound, volume: data.alarm.volume, fadeIn: data.alarm.fadeInSeconds)
+        if screenshotScreen == nil {
+            audio.startRinging(currentSound, volume: data.alarm.volume, fadeIn: data.alarm.fadeInSeconds)
+        }
         let alarm = data.alarm
         ringing = RingContext(
             isTest: session?.isTest ?? isTest,

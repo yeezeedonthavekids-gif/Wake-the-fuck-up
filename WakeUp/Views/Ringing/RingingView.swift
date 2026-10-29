@@ -52,7 +52,7 @@ struct RingingView: View {
         .onAppear {
             let appModel = model
             runner.onStepComplete = { [weak appModel] in appModel?.challengeProgressed() }
-            if context.startIndex > 0 { started = true }
+            if context.startIndex > 0 || model.screenshotScreen == "ringing-challenge" { started = true }
         }
         .onChange(of: runner.finished) { _, finished in
             guard finished, outcome == nil else { return }

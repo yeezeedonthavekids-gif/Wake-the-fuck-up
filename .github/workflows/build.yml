@@ -13,6 +13,32 @@ jobs:
           xcodebuild -version
       - name: Generate project
         run: brew install xcodegen && xcodegen generate
+      - name: Screenshots (iOS simulator)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(), reverse=True) if 'iOS' in k for x in v if x['name'] == 'iPhone 17 Pro'))")
+          set -o pipefail
+          xcodebuild -project WakeUp.xcodeproj -scheme WakeUp -configuration Debug -destination "id=$UDID" \
+            -derivedDataPath simbuild CODE_SIGNING_ALLOWED=NO build 2>&1 | grep -E "error:|\*\* BUILD" || true
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time "9:41" --batteryState charged --batteryLevel 100
+          xcrun simctl install "$UDID" simbuild/Build/Products/Debug-iphonesimulator/WakeUp.app
+          mkdir -p shots
+          for mode in light dark; do
+            xcrun simctl ui "$UDID" appearance $mode
+            for screen in onboarding-welcome onboarding-look onboarding-challenge home editor settings ringing ringing-challenge; do
+              xcrun simctl launch --terminate-running-process "$UDID" app.wakeup.WakeUp -WakeUpScreenshot $screen >/dev/null
+              sleep 6
+              xcrun simctl io "$UDID" screenshot "shots/$mode-$screen.png" >/dev/null
+            done
+          done
+          ls -la shots
+          cd shots
+          git init -q && git checkout -q -b screenshots
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com add . 
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "Screenshots for ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screenshots
       - name: Unit tests (iOS simulator)
         run: |
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(), reverse=True) if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")

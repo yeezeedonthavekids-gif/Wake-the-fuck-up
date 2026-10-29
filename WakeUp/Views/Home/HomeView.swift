@@ -23,6 +23,10 @@ struct HomeView: View {
         .sheet(isPresented: $editing) { AlarmEditorView() }
         .sheet(isPresented: $showingSettings) { SettingsView() }
         .sheet(isPresented: $model.showTestSheet) { TestAlarmSheet().presentationDetents([.medium, .large]) }
+        .onAppear {
+            if model.screenshotScreen == "editor" { editing = true }
+            if model.screenshotScreen == "settings" { showingSettings = true }
+        }
     }
 
     private var header: some View {
