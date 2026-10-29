@@ -197,14 +197,12 @@ struct QRDestinationChallengeView: View {
 
 // MARK: - Squats and push-ups
 
-/// With the camera on (the default), a rep only counts when the camera sees it. Tapping to count
-/// is only used if camera checking is turned off for this step.
+/// A rep only counts when the camera sees it. There is no tap-to-count option.
 struct RepChallengeView: View {
     let step: ChallengeStep
     let onDone: () -> Void
     @Environment(\.theme) private var theme
     @State private var reps = 0
-    @State private var lastTap = Date.distantPast
     @State private var cameraAllowed: Bool? = nil
     @State private var counter: ExerciseRepCounter
     @State private var seatedAlternative = false
@@ -226,11 +224,7 @@ struct RepChallengeView: View {
             }
         } else {
             VStack(alignment: .leading, spacing: 14) {
-                if step.cameraCounting {
-                    cameraMode
-                } else {
-                    tapMode
-                }
+                cameraMode
                 Button("Low-movement alternative") { seatedAlternative = true }
                     .font(.subheadline)
                     .frame(maxWidth: .infinity)
@@ -308,28 +302,10 @@ struct RepChallengeView: View {
         }
     }
 
-    // MARK: Tap counting (only when camera checking is off)
-
-    @ViewBuilder private var tapMode: some View {
-        Text("Do \(step.goal) comfortable \(exercise). Tap once after each rep. This trusts you.")
-            .font(.subheadline).foregroundStyle(Palette.text2)
-        ProgressRing(value: reps, total: step.goal, caption: "of \(step.goal) reps")
-        Button("+1 rep", action: tapRep)
-            .buttonStyle(PrimaryButtonStyle())
-            .accessibilityHint("Tap once after each repetition")
-    }
-
     private var memoryStep: ChallengeStep {
         var s = ChallengeStep(kind: .memory, difficulty: step.difficulty)
         s.goal = 5
         return s
-    }
-
-    private func tapRep() {
-        // Ignore double taps faster than any real rep.
-        guard Date().timeIntervalSince(lastTap) > 0.7 else { return }
-        lastTap = Date()
-        add()
     }
 
     private func add() {

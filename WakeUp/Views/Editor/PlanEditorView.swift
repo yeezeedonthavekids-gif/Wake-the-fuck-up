@@ -147,9 +147,9 @@ struct StepEditorView: View {
             }
         case .squats, .pushups:
             Section {
-                Toggle("Camera confirms each rep", isOn: $step.cameraCounting)
+                Label("The camera confirms every rep", systemImage: "camera.viewfinder")
             } footer: {
-                Text("Pick a number you can do comfortably. With the camera off you count by tapping, which trusts you. A low-movement alternative is always offered.")
+                Text("Pick a number you can do comfortably. A low-movement alternative is always offered.")
             }
         default:
             EmptyView()
