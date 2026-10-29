@@ -282,10 +282,10 @@ struct ExerciseRepCounter {
     static func angle(_ a: CGPoint, _ vertex: CGPoint, _ c: CGPoint) -> Double {
         let v1 = CGVector(dx: a.x - vertex.x, dy: a.y - vertex.y)
         let v2 = CGVector(dx: c.x - vertex.x, dy: c.y - vertex.y)
-        let dot = v1.dx * v2.dx + v1.dy * v2.dy
-        let lengths = hypot(v1.dx, v1.dy) * hypot(v2.dx, v2.dy)
+        let dot = Double(v1.dx * v2.dx + v1.dy * v2.dy)
+        let lengths = Double(hypot(v1.dx, v1.dy) * hypot(v2.dx, v2.dy))
         guard lengths > 0 else { return 180 }
-        return acos(max(-1, min(1, dot / lengths))) * 180 / .pi
+        return Foundation.acos(max(-1, min(1, dot / lengths))) * 180 / Double.pi
     }
 
     /// Returns true when a confirmed repetition completes.
