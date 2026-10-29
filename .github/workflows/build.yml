@@ -2,18 +2,53 @@ name: Build IPA
 on: [push, workflow_dispatch]
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: python3 gen_sounds.py && brew install xcodegen && xcodegen generate
-      - run: xcodebuild -project WakeUp.xcodeproj -target WakeUp -sdk iphoneos -configuration Release SYMROOT=$PWD/build CODE_SIGNING_ALLOWED=NO build
-      - run: mkdir Payload && cp -R build/Release-iphoneos/WakeUp.app Payload/ && zip -r WakeUp.ipa Payload
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          xcodebuild -version
+      - name: Generate project
+        run: brew install xcodegen && xcodegen generate
+      - name: Unit tests (iOS simulator)
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(), reverse=True) if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          echo "Simulator: $UDID"
+          set -o pipefail
+          xcodebuild test -project WakeUp.xcodeproj -scheme WakeUp -destination "id=$UDID" \
+            -resultBundlePath TestResults.xcresult CODE_SIGNING_ALLOWED=NO 2>&1 | tee test.log \
+            | grep -E "error:|warning: .*WakeUp/|Test Case .*(passed|failed)|Executed|\*\* TEST" || true
+          grep -q "\*\* TEST SUCCEEDED \*\*" test.log
+      - name: Build Release for iPhone
+        run: |
+          set -o pipefail
+          xcodebuild -project WakeUp.xcodeproj -scheme WakeUp -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log \
+            | grep -E "error:|\*\* BUILD" || true
+          grep -q "\*\* BUILD SUCCEEDED \*\*" build.log
+      - name: Package and verify IPA
+        run: |
+          APP=build/Build/Products/Release-iphoneos/WakeUp.app
+          mkdir -p Payload && cp -R "$APP" Payload/ && zip -qry WakeUp.ipa Payload
+          unzip -l WakeUp.ipa | tail -1
+          lipo -info Payload/WakeUp.app/WakeUp
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" -c "Print :CFBundleShortVersionString" -c "Print :MinimumOSVersion" -c "Print :NSAlarmKitUsageDescription" Payload/WakeUp.app/Info.plist
+          COUNT=$(ls Payload/WakeUp.app/*.wav | wc -l | tr -d ' ')
+          echo "Bundled sounds: $COUNT"; test "$COUNT" -ge 15
+          test -f Payload/WakeUp.app/Assets.car
+          ls -la WakeUp.ipa
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: WakeUp-ipa
-          path: WakeUp.ipa
+          name: WakeUp-build
+          path: |
+            WakeUp.ipa
+            test.log
+            build.log
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: latest

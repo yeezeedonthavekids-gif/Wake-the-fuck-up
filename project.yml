@@ -1,25 +1,59 @@
 name: WakeUp
 options:
+  bundleIdPrefix: app.wakeup
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "2.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
 targets:
   WakeUp:
     type: application
     platform: iOS
-    sources: [Sources, Resources]
+    sources:
+      - path: WakeUp
+        excludes:
+          - "Info.plist"
     info:
-      path: Sources/Info.plist
+      path: WakeUp/Info.plist
       properties:
         CFBundleDisplayName: WakeUp
-        UILaunchScreen: {}
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen:
+          UIColorName: ""
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIBackgroundModes: [audio]
-        NSMotionUsageDescription: Shake to prove you're awake.
-        NSCameraUsageDescription: Checks your eyes are open to prove you're awake.
+        ITSAppUsesNonExemptEncryption: false
+        NSAlarmKitUsageDescription: WakeUp schedules your alarm as a system alarm so it rings on the lock screen, even when the app is closed.
+        NSCameraUsageDescription: Some wake-up challenges use the camera to scan a QR code, check an item, count reps or see that your eyes are open. Images are processed on your iPhone and never stored or uploaded.
+        NSSupportsLiveActivities: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.wakeup.alarm
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
-        SWIFT_VERSION: "5.0"
+        PRODUCT_BUNDLE_IDENTIFIER: app.wakeup.WakeUp
         TARGETED_DEVICE_FAMILY: "1"
-        CODE_SIGNING_ALLOWED: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: YES
+  WakeUpTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: WakeUp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: app.wakeup.WakeUpTests
+schemes:
+  WakeUp:
+    build:
+      targets:
+        WakeUp: all
+        WakeUpTests: [test]
+    test:
+      targets: [WakeUpTests]
+      gatherCoverageData: false
