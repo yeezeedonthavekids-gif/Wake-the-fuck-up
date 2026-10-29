@@ -1,0 +1,12 @@
+name: Probe
+on: workflow_dispatch
+jobs:
+  probe:
+    strategy:
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - run: ls -d /Applications/Xcode*.app; xcodebuild -version; xcodebuild -showsdks | grep -i ios
+      - run: xcrun simctl list runtimes; xcrun simctl list devices available | grep -i iphone | head -5
+      - run: for x in /Applications/Xcode_26*.app; do ls "$x/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks" | grep -i alarm && echo "$x has AlarmKit"; done; true
