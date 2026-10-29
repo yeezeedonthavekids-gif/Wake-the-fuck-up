@@ -162,11 +162,17 @@ struct CameraPhotoPicker: UIViewControllerRepresentable {
 
 /// Front camera preview that feeds body-pose frames to a callback. Stops the camera when it disappears.
 struct PoseCameraView: UIViewControllerRepresentable {
-    let onFrame: (PoseFrame) -> Void
+    var onFrame: ((PoseFrame) -> Void)?
+    var onFace: ((Double?) -> Void)?
 
     func makeUIViewController(context: Context) -> PoseCameraController {
         let controller = PoseCameraController()
-        controller.processor.onFrame = onFrame
+        if let onFrame {
+            controller.processor.onFrame = onFrame
+        } else {
+            controller.faceProcessor.onFace = onFace
+            controller.trackFaces = true
+        }
         return controller
     }
 
@@ -175,6 +181,8 @@ struct PoseCameraView: UIViewControllerRepresentable {
 
 final class PoseCameraController: UIViewController {
     let processor = PoseProcessor()
+    let faceProcessor = FaceSizeProcessor()
+    var trackFaces = false
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "wakeup.pose")
     private var preview: AVCaptureVideoPreviewLayer?
@@ -189,7 +197,11 @@ final class PoseCameraController: UIViewController {
         session.addInput(input)
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
-        output.setSampleBufferDelegate(processor, queue: queue)
+        if trackFaces {
+            output.setSampleBufferDelegate(faceProcessor, queue: queue)
+        } else {
+            output.setSampleBufferDelegate(processor, queue: queue)
+        }
         guard session.canAddOutput(output) else { return }
         session.addOutput(output)
         // Deliver upright portrait frames so "down" in the image is down in the room.

@@ -267,6 +267,34 @@ final class ExerciseRepCounterTests: XCTestCase {
     }
 }
 
+final class FacePushupCounterTests: XCTestCase {
+    func testCountsFaceComingCloseAndGoingBack() {
+        var counter = FacePushupCounter()
+        var counted = 0
+        for _ in 0..<4 {
+            for w in stride(from: 0.20, through: 0.55, by: 0.03) { if counter.add(w) { counted += 1 } }
+            for _ in 0..<3 { if counter.add(nil) { counted += 1 } } // too close to detect at the bottom
+            for w in stride(from: 0.55, through: 0.20, by: -0.03) { if counter.add(w) { counted += 1 } }
+        }
+        XCTAssertEqual(counted, 4)
+    }
+
+    func testSmallHeadBobsDontCount() {
+        var counter = FacePushupCounter()
+        for _ in 0..<10 {
+            for w in [0.20, 0.23, 0.26, 0.23, 0.20] { _ = counter.add(w) }
+        }
+        XCTAssertEqual(counter.reps, 0)
+    }
+
+    func testNoFaceNoReps() {
+        var counter = FacePushupCounter()
+        for _ in 0..<30 { _ = counter.add(nil) }
+        XCTAssertEqual(counter.reps, 0)
+        XCTAssertEqual(counter.status, .noFace)
+    }
+}
+
 final class PersistenceTests: XCTestCase {
     private var directory: URL!
 

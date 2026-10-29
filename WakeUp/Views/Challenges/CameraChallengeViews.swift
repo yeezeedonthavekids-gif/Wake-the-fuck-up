@@ -205,6 +205,7 @@ struct RepChallengeView: View {
     @State private var reps = 0
     @State private var cameraAllowed: Bool? = nil
     @State private var counter: ExerciseRepCounter
+    @State private var faceCounter = FacePushupCounter()
     @State private var seatedAlternative = false
 
     init(step: ChallengeStep, onDone: @escaping () -> Void) {
@@ -252,8 +253,12 @@ struct RepChallengeView: View {
             }
         case .some(true):
             Text(setupText).font(.subheadline).foregroundStyle(Palette.text2)
-            PoseCameraView { frame in
-                if counter.add(frame) { add() }
+            Group {
+                if isPushup {
+                    PoseCameraView(onFace: { width in if faceCounter.add(width) { add() } })
+                } else {
+                    PoseCameraView(onFrame: { frame in if counter.add(frame) { add() } })
+                }
             }
             .frame(height: 400)
             .clipShape(RoundedRectangle(cornerRadius: theme.smallRadius, style: .continuous))
@@ -274,19 +279,28 @@ struct RepChallengeView: View {
             }
             .accessibilityElement()
             .accessibilityLabel("\(reps) of \(step.goal) \(exercise) confirmed. \(statusText)")
-            Text("Reps only count when the camera sees your \(isPushup ? "elbows bend and your body lower" : "knees bend and your hips lower"), then come back up. Everything is processed on this iPhone.")
+            Text(isPushup
+                 ? "A rep counts when your face comes close to the phone, then goes back up. Your phone buzzes for each one. Everything is processed on this iPhone."
+                 : "Reps only count when the camera sees your knees bend and your hips lower, then come back up. Everything is processed on this iPhone.")
                 .font(.footnote).foregroundStyle(Palette.text3)
         }
     }
 
     private var setupText: String {
         isPushup
-            ? "Prop your phone up on the floor 1–2 m away, side-on to you, so your shoulder, elbow, wrist and hip are in view. Then do \(step.goal) push-ups."
+            ? "Put your phone flat on the floor under your face, screen up. Get into push-up position looking down at it, then do \(step.goal) push-ups, lowering until your face is close to the phone."
             : "Stand the phone up 2 m away, side-on to you, so your whole body from shoulder to ankle is in view. Then do \(step.goal) squats."
     }
 
     private var statusText: String {
-        switch counter.status {
+        if isPushup {
+            switch faceCounter.status {
+            case .noFace: return "Look down at the phone so it can see your face"
+            case .up: return reps == 0 ? "Ready. Go down." : "Up. Go down again."
+            case .down: return "Down. Now push back up."
+            }
+        }
+        return switch counter.status {
         case .noBody: "Can't see you yet. Step into view."
         case .getInPosition: isPushup ? "Turn side-on so your arm and hip are visible" : "Turn side-on so your hip, knee and ankle are visible"
         case .up: reps == 0 ? "Ready. Go down." : "Up. Go down again."
@@ -295,7 +309,14 @@ struct RepChallengeView: View {
     }
 
     private var statusSymbol: String {
-        switch counter.status {
+        if isPushup {
+            switch faceCounter.status {
+            case .noFace: return "face.dashed"
+            case .up: return "arrow.down"
+            case .down: return "arrow.up"
+            }
+        }
+        return switch counter.status {
         case .noBody, .getInPosition: "viewfinder"
         case .up: "arrow.down"
         case .down: "arrow.up"

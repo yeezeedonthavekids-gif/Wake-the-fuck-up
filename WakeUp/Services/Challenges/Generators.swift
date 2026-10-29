@@ -333,3 +333,54 @@ struct ExerciseRepCounter {
         return false
     }
 }
+
+/// Counts push-ups with the phone flat on the floor under your face. The front camera measures
+/// how big your face looks: lowering makes it much bigger, pushing up makes it smaller again.
+/// A rep needs the face to grow to `downRatio` × its size at the top, then shrink back below
+/// `upRatio` ×. If the face fills the frame at the bottom and isn't detected, that still counts as down.
+struct FacePushupCounter {
+    enum Status: Equatable { case noFace, up, down }
+
+    private(set) var reps = 0
+    private(set) var status = Status.noFace
+    let downRatio = 1.5
+    let upRatio = 1.2
+    /// Face width at the top of the push-up (arms straight), learned as you go.
+    private(set) var topSize: Double?
+    private var smoothed: Double?
+
+    /// `faceWidth` is the face's width as a share of the frame, or nil if no face was found.
+    mutating func add(_ faceWidth: Double?) -> Bool {
+        guard let width = faceWidth else {
+            if status != .down { status = .noFace }
+            return false
+        }
+        let size = smoothed.map { $0 * 0.5 + width * 0.5 } ?? width
+        smoothed = size
+        guard let top = topSize else {
+            topSize = size
+            status = .up
+            return false
+        }
+        switch status {
+        case .down:
+            if size <= top * upRatio {
+                reps += 1
+                status = .up
+                topSize = size
+                return true
+            }
+        case .up, .noFace:
+            status = .up
+            if size < top {
+                topSize = size
+            } else if size >= top * downRatio {
+                status = .down
+            } else if size < top * upRatio {
+                // Drift slowly toward the current resting size so a new position is learned.
+                topSize = top * 0.9 + size * 0.1
+            }
+        }
+        return false
+    }
+}

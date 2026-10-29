@@ -68,3 +68,19 @@ final class PoseProcessor: NSObject, AVCaptureVideoDataOutputSampleBufferDelegat
         DispatchQueue.main.async { [weak self] in self?.onFrame?(frame) }
     }
 }
+
+/// Front camera: reports the width of the largest face as a share of the frame, about 12 times a second.
+final class FaceSizeProcessor: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    var onFace: ((Double?) -> Void)?
+    private var lastRun = Date.distantPast
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let now = Date()
+        guard now.timeIntervalSince(lastRun) > 0.08 else { return }
+        lastRun = now
+        let request = VNDetectFaceRectanglesRequest()
+        try? VNImageRequestHandler(cmSampleBuffer: sampleBuffer, orientation: .up, options: [:]).perform([request])
+        let width = (request.results ?? []).map { Double($0.boundingBox.width) }.max()
+        DispatchQueue.main.async { [weak self] in self?.onFace?(width) }
+    }
+}
