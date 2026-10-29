@@ -84,3 +84,57 @@ final class FaceSizeProcessor: NSObject, AVCaptureVideoDataOutputSampleBufferDel
         DispatchQueue.main.async { [weak self] in self?.onFace?(width) }
     }
 }
+
+/// Back camera: looks for a chosen item about twice a second. Reports the image labels Vision sees
+/// and, if a reference photo was given, how far the live view is from it (smaller is closer).
+final class ItemProcessor: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    var reference: VNFeaturePrintObservation?
+    var onResult: (([String], Float?) -> Void)?
+    private var lastRun = Date.distantPast
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let now = Date()
+        guard now.timeIntervalSince(lastRun) > 0.4 else { return }
+        lastRun = now
+        let classify = VNClassifyImageRequest()
+        let print = VNGenerateImageFeaturePrintRequest()
+        let requests: [VNRequest] = reference == nil ? [classify] : [classify, print]
+        try? VNImageRequestHandler(cmSampleBuffer: sampleBuffer, orientation: .up, options: [:]).perform(requests)
+        let labels = (classify.results ?? []).filter { $0.confidence > 0.1 }.prefix(10)
+            .map { $0.identifier.replacingOccurrences(of: "_", with: " ") }
+        var distance: Float?
+        if let reference, let live = print.results?.first {
+            var value: Float = 0
+            if (try? live.computeDistance(&value, to: reference)) != nil { distance = value }
+        }
+        DispatchQueue.main.async { [weak self] in self?.onResult?(Array(labels), distance) }
+    }
+}
+
+extension ItemRecognizer {
+    /// How close a live frame must be to the reference photo to count as the same item.
+    static let matchDistance: Float = 0.6
+
+    static func featurePrint(for image: UIImage) -> VNFeaturePrintObservation? {
+        guard let cg = image.cgImage else { return nil }
+        let request = VNGenerateImageFeaturePrintRequest()
+        try? VNImageRequestHandler(cgImage: cg, orientation: CGImagePropertyOrientation(image.imageOrientation), options: [:]).perform([request])
+        return request.results?.first
+    }
+}
+
+extension CGImagePropertyOrientation {
+    init(_ orientation: UIImage.Orientation) {
+        switch orientation {
+        case .up: self = .up
+        case .down: self = .down
+        case .left: self = .left
+        case .right: self = .right
+        case .upMirrored: self = .upMirrored
+        case .downMirrored: self = .downMirrored
+        case .leftMirrored: self = .leftMirrored
+        case .rightMirrored: self = .rightMirrored
+        @unknown default: self = .up
+        }
+    }
+}

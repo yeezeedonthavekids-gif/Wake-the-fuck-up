@@ -366,7 +366,7 @@ private struct DifficultyPage: View {
                     }
                     if step.wrappedValue.kind == .findItem {
                         Picker("Mode", selection: step.findMode) {
-                            ForEach(FindMode.allCases) { Text($0.title).tag($0) }
+                            ForEach(FindMode.choices) { Text($0.title).tag($0) }
                         }
                         Text(step.wrappedValue.findMode.explanation).font(.footnote).foregroundStyle(Palette.text2)
                     }

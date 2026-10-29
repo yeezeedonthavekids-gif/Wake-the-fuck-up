@@ -13,11 +13,8 @@ struct FindItemChallengeView: View {
     @State private var found = 0
     @State private var target: HouseholdItem? = nil
     @State private var scanning = false
-    @State private var capturing = false
-    @State private var photo: UIImage? = nil
-    @State private var labels: [String] = []
-    @State private var analyzing = false
     @State private var feedback: String? = nil
+    @State private var cameraAllowed: Bool? = nil
     @State private var useBackup = false
 
     private var pool: [HouseholdItem] {
@@ -28,7 +25,7 @@ struct FindItemChallengeView: View {
     var body: some View {
         if pool.isEmpty {
             BackupChallengeView(reason: "Your item library is empty.", onDone: onDone)
-        } else if useBackup {
+        } else if useBackup || cameraAllowed == false {
             BackupChallengeView(reason: "The camera isn't available.", onDone: onDone)
         } else {
             content
@@ -52,103 +49,94 @@ struct FindItemChallengeView: View {
                 }
                 .accessibilityElement(children: .combine)
                 if let feedback { Text(feedback).font(.subheadline).foregroundStyle(Palette.warn) }
-                switch step.findMode {
-                case .randomTarget: manualMode(target)
-                case .qrCode: qrMode(target)
-                case .photo: photoMode(target)
+                if step.findMode == .qrCode {
+                    Text("Scan the WakeUp code you stuck on it. Print codes from Settings → Item library.")
+                        .font(.subheadline).foregroundStyle(Palette.text2)
+                    Button("Scan the code") { scanning = true }.buttonStyle(PrimaryButtonStyle())
+                } else if cameraAllowed == true {
+                    LiveItemFinder(item: target, referenceURL: target.photoFile.map(model.persistence.photoURL), onFound: success)
+                        .id(target.id)
+                } else {
+                    ProgressView("Starting the camera…").frame(maxWidth: .infinity, minHeight: 120)
                 }
             }
         }
         .onAppear { if target == nil { target = pool.randomElement() } }
+        .task {
+            if step.findMode != .qrCode { cameraAllowed = await CameraAccess.request() }
+        }
         .sheet(isPresented: $scanning) {
             QRScannerSheet { code in
                 if code == target?.qrCode { success() } else { feedback = "That's a different code. Find the one on your \(target?.name.lowercased() ?? "item")." }
             } onUnavailable: { useBackup = true }
-        }
-        .fullScreenCover(isPresented: $capturing) {
-            CameraPhotoPicker { image in
-                capturing = false
-                guard let image else { return }
-                photo = image
-                analyze(image)
-            }
-            .ignoresSafeArea()
-        }
-    }
-
-    private func manualMode(_ item: HouseholdItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Go and get it, then confirm. This trusts you.").font(.subheadline).foregroundStyle(Palette.text2)
-            Button("I have my \(item.name.lowercased())", action: success).buttonStyle(PrimaryButtonStyle())
-        }
-    }
-
-    private func qrMode(_ item: HouseholdItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Scan the WakeUp code you stuck on it. Print codes from Settings → Item library.")
-                .font(.subheadline).foregroundStyle(Palette.text2)
-            Button("Scan the code") { scanning = true }.buttonStyle(PrimaryButtonStyle())
-        }
-    }
-
-    @ViewBuilder private func photoMode(_ item: HouseholdItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let photo {
-                HStack(spacing: 10) {
-                    Image(uiImage: photo).resizable().scaledToFill().frame(width: 120, height: 120).clipped()
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .accessibilityLabel("Your photo")
-                    if let file = item.photoFile, let reference = UIImage(contentsOfFile: model.persistence.photoURL(file).path) {
-                        Image(uiImage: reference).resizable().scaledToFill().frame(width: 120, height: 120).clipped()
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .accessibilityLabel("Your reference photo")
-                    }
-                }
-                if analyzing {
-                    ProgressView("Looking at your photo on this iPhone…")
-                } else if ItemRecognizer.matches(labels, item: item) {
-                    Banner(text: "Recognized: this looks like a \(item.name.lowercased()).", symbol: "checkmark.seal.fill", tint: Palette.good)
-                    Button("Continue", action: success).buttonStyle(PrimaryButtonStyle())
-                } else {
-                    Text("WakeUp couldn't recognize it\(labels.isEmpty ? "" : " (it saw: \(labels.prefix(3).joined(separator: ", ")))"). Confirm only if it really is your \(item.name.lowercased()).")
-                        .font(.subheadline).foregroundStyle(Palette.text2)
-                    Button("It's my \(item.name.lowercased())", action: success).buttonStyle(PrimaryButtonStyle())
-                    Button("Take another photo") { capturing = true }.buttonStyle(SecondaryButtonStyle())
-                }
-            } else {
-                Text("Take a photo of it. It's checked on this iPhone and never saved.")
-                    .font(.subheadline).foregroundStyle(Palette.text2)
-                Button("Take a photo") {
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Task { if await CameraAccess.request() { capturing = true } else { useBackup = true } }
-                    } else {
-                        useBackup = true
-                    }
-                }
-                .buttonStyle(PrimaryButtonStyle())
-            }
-        }
-    }
-
-    private func analyze(_ image: UIImage) {
-        analyzing = true
-        Task {
-            labels = await ItemRecognizer.labels(for: image)
-            analyzing = false
         }
     }
 
     private func success() {
         Haptics.success()
         found += 1
-        photo = nil
-        labels = []
         feedback = nil
         if found >= step.goal {
             onDone()
         } else {
             let others = pool.filter { $0.id != target?.id }
             target = (others.isEmpty ? pool : others).randomElement()
+        }
+    }
+}
+
+/// Live back-camera view that completes when the item is recognized twice in a row,
+/// by image labels or by matching the item's reference photo. There's no manual confirm.
+struct LiveItemFinder: View {
+    let item: HouseholdItem
+    let referenceURL: URL?
+    let onFound: () -> Void
+    @Environment(\.theme) private var theme
+    @State private var processor = ItemProcessor()
+    @State private var seen: [String] = []
+    @State private var streak = 0
+    @State private var done = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Go get it and point your camera at it. It's recognized on this iPhone, nothing is saved.")
+                .font(.subheadline).foregroundStyle(Palette.text2)
+            ItemCameraView(processor: processor)
+                .frame(height: 360)
+                .clipShape(RoundedRectangle(cornerRadius: theme.smallRadius, style: .continuous))
+                .overlay(alignment: .bottom) {
+                    Label(done ? "Found it!" : streak > 0 ? "That looks like it, hold still…" : "Looking for your \(item.name.lowercased())…",
+                          systemImage: done ? "checkmark.seal.fill" : "viewfinder")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .padding(12)
+                }
+            if !seen.isEmpty {
+                Text("Camera sees: \(seen.prefix(4).joined(separator: ", "))").font(.footnote).foregroundStyle(Palette.text3)
+            }
+            if referenceURL == nil {
+                Text("Tip: add a reference photo of your \(item.name.lowercased()) in Settings → Item library so it's recognized reliably.")
+                    .font(.footnote).foregroundStyle(Palette.text3)
+            }
+        }
+        .onAppear(perform: start)
+    }
+
+    private func start() {
+        if let referenceURL, let image = UIImage(contentsOfFile: referenceURL.path) {
+            processor.reference = ItemRecognizer.featurePrint(for: image)
+        }
+        processor.onResult = { labels, distance in
+            guard !done else { return }
+            seen = labels
+            let byLabel = ItemRecognizer.matches(labels, item: item)
+            let byPhoto = distance.map { $0 < ItemRecognizer.matchDistance } ?? false
+            streak = (byLabel || byPhoto) ? streak + 1 : 0
+            if streak >= 2 {
+                done = true
+                onFound()
+            }
         }
     }
 }

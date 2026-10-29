@@ -127,7 +127,7 @@ struct StepEditorView: View {
         case .findItem:
             Section {
                 Picker("Mode", selection: $step.findMode) {
-                    ForEach(FindMode.allCases) { Text($0.title).tag($0) }
+                    ForEach(FindMode.choices) { Text($0.title).tag($0) }
                 }
                 NavigationLink("Item library") { ItemLibraryView() }
             } footer: {

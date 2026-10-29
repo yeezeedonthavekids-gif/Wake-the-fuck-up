@@ -43,20 +43,20 @@ enum MemoryStyle: String, Codable, CaseIterable, Identifiable {
 }
 
 enum FindMode: String, Codable, CaseIterable, Identifiable {
+    /// `photo` is kept so older saved plans still load; it now works the same as `randomTarget`.
     case randomTarget, qrCode, photo
     var id: String { rawValue }
+    static var choices: [FindMode] { [.randomTarget, .qrCode] }
     var title: String {
         switch self {
-        case .randomTarget: "Random item"
+        case .randomTarget, .photo: "Camera recognizes it"
         case .qrCode: "Scan the item's QR code"
-        case .photo: "Photo check"
         }
     }
     var explanation: String {
         switch self {
-        case .randomTarget: "WakeUp picks an item. You go and get it, then confirm. This trusts you: it's confirmation, not verification."
+        case .randomTarget, .photo: "WakeUp picks an item and you point your camera at it. It has to be recognized on your iPhone, either by image recognition or by matching the reference photo you added. Adding a reference photo makes it much more reliable."
         case .qrCode: "Stick a printed WakeUp code on the item. Scanning it proves you reached the code, not that you used the item."
-        case .photo: "Take a photo of the item. WakeUp tries to recognize it on your iPhone. If it can't, you confirm it yourself. Photos are never stored."
         }
     }
 }
@@ -216,7 +216,7 @@ enum ChallengeKind: String, Codable, CaseIterable, Identifiable {
         case .memory: "Checks that you can repeat the sequence. It can't prove you're fully alert."
         case .typing: "Checks what you type, allowing a few typos on easier levels."
         case .tapSequence, .matching: "Checks that you tapped the right things. A quick, low-movement option."
-        case .findItem: FindMode.randomTarget.explanation
+        case .findItem: "The camera has to recognize the item on your iPhone. It can't tell whether you'll actually use it."
         case .qrDestination: "Scanning confirms you reached the code, not that you finished your morning routine."
         case .squats, .pushups: "The camera confirms each rep by checking that your joint bends and your body really lowers, then comes back up. It's processed on your iPhone and isn't a medical measurement. Stop if anything hurts."
         case .eyesOpen: "Needs a Face ID camera. It checks that your eyes are open, not that you're alert."

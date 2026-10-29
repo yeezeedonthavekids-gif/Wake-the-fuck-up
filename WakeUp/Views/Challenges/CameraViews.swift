@@ -183,6 +183,9 @@ final class PoseCameraController: UIViewController {
     let processor = PoseProcessor()
     let faceProcessor = FaceSizeProcessor()
     var trackFaces = false
+    /// Overrides the pose/face processors, for example to look for items.
+    var customProcessor: AVCaptureVideoDataOutputSampleBufferDelegate?
+    var position = AVCaptureDevice.Position.front
     private let session = AVCaptureSession()
     private let queue = DispatchQueue(label: "wakeup.pose")
     private var preview: AVCaptureVideoPreviewLayer?
@@ -191,13 +194,15 @@ final class PoseCameraController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         session.sessionPreset = .medium
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
               let input = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input) else { return }
         session.addInput(input)
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
-        if trackFaces {
+        if let customProcessor {
+            output.setSampleBufferDelegate(customProcessor, queue: queue)
+        } else if trackFaces {
             output.setSampleBufferDelegate(faceProcessor, queue: queue)
         } else {
             output.setSampleBufferDelegate(processor, queue: queue)
@@ -230,4 +235,18 @@ final class PoseCameraController: UIViewController {
         let session = session
         queue.async { session.stopRunning() }
     }
+}
+
+/// Back camera preview that looks for an item.
+struct ItemCameraView: UIViewControllerRepresentable {
+    let processor: ItemProcessor
+
+    func makeUIViewController(context: Context) -> PoseCameraController {
+        let controller = PoseCameraController()
+        controller.position = .back
+        controller.customProcessor = processor
+        return controller
+    }
+
+    func updateUIViewController(_ controller: PoseCameraController, context: Context) {}
 }
