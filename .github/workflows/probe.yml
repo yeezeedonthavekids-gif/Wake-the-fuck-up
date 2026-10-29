@@ -2,11 +2,16 @@ name: Probe
 on: workflow_dispatch
 jobs:
   probe:
-    strategy:
-      matrix:
-        os: [macos-15, macos-26]
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-26
     steps:
-      - run: ls -d /Applications/Xcode*.app; xcodebuild -version; xcodebuild -showsdks | grep -i ios
-      - run: xcrun simctl list runtimes; xcrun simctl list devices available | grep -i iphone | head -5
-      - run: for x in /Applications/Xcode_26*.app; do ls "$x/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk/System/Library/Frameworks" | grep -i alarm && echo "$x has AlarmKit"; done; true
+      - name: AlarmKit interface
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          F=$(find "$SDK/System/Library/Frameworks/AlarmKit.framework" -name "arm64e-apple-ios.swiftinterface" | head -1)
+          echo "$F"
+          grep -E "^\s*(public|@available|  (public )?(init|func|var|case|static))|struct |enum |protocol |class |extension " "$F" | grep -v "^\s*@_" | head -400
+      - name: AlertSound
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          F=$(find "$SDK/System/Library/Frameworks/ActivityKit.framework" -name "arm64e-apple-ios.swiftinterface" | head -1)
+          grep -n -A12 "struct AlertSound" "$F" | head -40
