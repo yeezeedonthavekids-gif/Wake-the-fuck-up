@@ -10,8 +10,14 @@ struct FindItemChallengeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.theme) private var theme
 
+    static let maxSkips = 3
+
     @State private var found = 0
     @State private var target: HouseholdItem? = nil
+    @State private var wheelItems: [HouseholdItem] = []
+    @State private var rotation: Double = 0
+    @State private var spinning = false
+    @State private var skipsLeft = FindItemChallengeView.maxSkips
     @State private var scanning = false
     @State private var feedback: String? = nil
     @State private var cameraAllowed: Bool? = nil
@@ -35,7 +41,14 @@ struct FindItemChallengeView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             Kicker(text: "Item \(found + 1) of \(step.goal)")
-            if let target {
+            if spinning || target == nil {
+                VStack(spacing: 12) {
+                    ItemWheel(items: wheelItems, rotation: rotation)
+                        .frame(width: 270, height: 290)
+                    Text("Spinning…").font(.system(.title3, design: .serif)).foregroundStyle(Palette.text2)
+                }
+                .frame(maxWidth: .infinity)
+            } else if let target {
                 HStack(spacing: 14) {
                     Image(systemName: target.symbol)
                         .font(.system(size: 34))
@@ -43,7 +56,7 @@ struct FindItemChallengeView: View {
                         .frame(width: 64, height: 64)
                         .background(theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     VStack(alignment: .leading) {
-                        Text("Find your").font(.subheadline).foregroundStyle(Palette.text2)
+                        Text("The wheel says: find your").font(.subheadline).foregroundStyle(Palette.text2)
                         Text(target.name).font(.system(.title, design: .serif)).foregroundStyle(Palette.text1)
                     }
                 }
@@ -59,9 +72,26 @@ struct FindItemChallengeView: View {
                 } else {
                     ProgressView("Starting the camera…").frame(maxWidth: .infinity, minHeight: 120)
                 }
+                if wheelItems.count > 1 {
+                    if skipsLeft > 0 {
+                        Button {
+                            skipsLeft -= 1
+                            spin()
+                        } label: {
+                            Label("I don't have this item (\(skipsLeft) spin\(skipsLeft == 1 ? "" : "s") left)", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    } else {
+                        Text("No spins left. Find this one!").font(.footnote).foregroundStyle(Palette.text3).frame(maxWidth: .infinity)
+                    }
+                }
             }
         }
-        .onAppear { if target == nil { target = pool.randomElement() } }
+        .onAppear {
+            guard wheelItems.isEmpty else { return }
+            wheelItems = Array(pool.shuffled().prefix(12))
+            spin()
+        }
         .task {
             if step.findMode != .qrCode { cameraAllowed = await CameraAccess.request() }
         }
@@ -72,6 +102,31 @@ struct FindItemChallengeView: View {
         }
     }
 
+    /// Spins the wheel and lands on a different item from the current one.
+    private func spin() {
+        let choices = wheelItems.indices.filter { wheelItems[$0].id != target?.id }
+        guard let index = choices.randomElement() ?? wheelItems.indices.first else { return }
+        feedback = nil
+        let landing = ItemWheel.landingRotation(toLand: index, count: wheelItems.count, from: rotation)
+        if theme.reduceMotion {
+            rotation = landing
+            target = wheelItems[index]
+            return
+        }
+        spinning = true
+        withAnimation(.timingCurve(0.15, 0.8, 0.25, 1, duration: 2.6)) { rotation = landing }
+        // Ticks that slow down like a real wheel, then a thunk when it lands.
+        for k in 0..<14 {
+            let delay = 2.4 * pow(Double(k) / 14, 2)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { Haptics.tap() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.7) {
+            target = wheelItems[index]
+            spinning = false
+            Haptics.success()
+        }
+    }
+
     private func success() {
         Haptics.success()
         found += 1
@@ -79,9 +134,78 @@ struct FindItemChallengeView: View {
         if found >= step.goal {
             onDone()
         } else {
-            let others = pool.filter { $0.id != target?.id }
-            target = (others.isEmpty ? pool : others).randomElement()
+            spin()
         }
+    }
+}
+
+/// A prize wheel of items with a pointer at the top.
+struct ItemWheel: View {
+    @Environment(\.theme) private var theme
+    let items: [HouseholdItem]
+    let rotation: Double
+
+    /// Clockwise rotation (in degrees, always increasing) that puts slice `index` under the pointer
+    /// after at least four full turns.
+    static func landingRotation(toLand index: Int, count: Int, from current: Double) -> Double {
+        let slice = 360 / Double(max(count, 1))
+        let middle = (Double(index) + 0.5) * slice
+        let wanted = (360 - middle).truncatingRemainder(dividingBy: 360)
+        var target = current - current.truncatingRemainder(dividingBy: 360) + 4 * 360 + wanted
+        if target - current < 4 * 360 { target += 360 }
+        return target
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.title)
+                .foregroundStyle(Palette.text1)
+                .zIndex(1)
+                .padding(.bottom, -10)
+            GeometryReader { geo in
+                let size = min(geo.size.width, geo.size.height)
+                let radius = size / 2
+                let slice = 360 / Double(max(items.count, 1))
+                ZStack {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        WheelSlice(start: Double(index) * slice, end: Double(index + 1) * slice)
+                            .fill(index.isMultiple(of: 2) ? theme.accent : theme.accent.opacity(0.55))
+                        WheelSlice(start: Double(index) * slice, end: Double(index + 1) * slice)
+                            .stroke(Palette.sheet, lineWidth: 2)
+                        let angle = ((Double(index) + 0.5) * slice - 90) * .pi / 180
+                        Image(systemName: item.symbol)
+                            .font(.system(size: items.count > 8 ? 18 : 24, weight: .semibold))
+                            .foregroundStyle(theme.accentInk)
+                            .rotationEffect(.degrees((Double(index) + 0.5) * slice))
+                            .offset(x: CGFloat(cos(angle)) * radius * 0.66, y: CGFloat(sin(angle)) * radius * 0.66)
+                    }
+                    Circle().fill(Palette.sheet).frame(width: size * 0.18)
+                    Circle().strokeBorder(Palette.line, lineWidth: 3)
+                }
+                .frame(width: size, height: size)
+                .rotationEffect(.degrees(rotation))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Item wheel with \(items.map(\.name).joined(separator: ", "))")
+    }
+}
+
+/// One wedge of the wheel. Angles are degrees clockwise from the top.
+struct WheelSlice: Shape {
+    let start: Double
+    let end: Double
+
+    func path(in rect: CGRect) -> Path {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        var path = Path()
+        path.move(to: center)
+        path.addArc(center: center, radius: radius, startAngle: .degrees(start - 90), endAngle: .degrees(end - 90), clockwise: false)
+        path.closeSubpath()
+        return path
     }
 }
 

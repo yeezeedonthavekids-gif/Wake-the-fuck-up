@@ -295,6 +295,23 @@ final class FacePushupCounterTests: XCTestCase {
     }
 }
 
+final class ItemWheelTests: XCTestCase {
+    func testWheelLandsOnTheChosenSliceAfterFullTurns() {
+        for count in [2, 5, 6, 12] {
+            var current = 0.0
+            for index in 0..<count {
+                let target = ItemWheel.landingRotation(toLand: index, count: count, from: current)
+                XCTAssertGreaterThanOrEqual(target - current, 4 * 360)
+                // After rotating, the slice's middle must sit at the top (0°).
+                let slice = 360 / Double(count)
+                let middle = ((Double(index) + 0.5) * slice + target).truncatingRemainder(dividingBy: 360)
+                XCTAssertEqual(min(middle, 360 - middle), 0, accuracy: 0.0001, "count \(count) index \(index)")
+                current = target
+            }
+        }
+    }
+}
+
 final class PersistenceTests: XCTestCase {
     private var directory: URL!
 
