@@ -134,6 +134,14 @@ struct StatusRow: View {
                 Text("Notifications play their sound once and stay silent in silent mode. Keep WakeUp open in the background for a full ringing alarm.")
                     .font(.footnote).foregroundStyle(Palette.text2)
             }
+        case .inAppOnly(_, let reason):
+            VStack(alignment: .leading, spacing: 6) {
+                label("speaker.wave.2.fill", "WakeUp will ring by itself", Palette.warn)
+                Text("\(reason) WakeUp stays awake in the background and rings at alarm time. Don't swipe it away, keep your volume up, and keep it charging overnight.")
+                    .font(.footnote).foregroundStyle(Palette.text2)
+                Button("Try allowing system alarms") { Task { await model.reschedule(requestPermission: true) } }
+                    .font(.footnote.weight(.semibold))
+            }
         case .needsPermission(let message), .failed(let message):
             VStack(alignment: .leading, spacing: 8) {
                 label("xmark.octagon.fill", "Not scheduled", Palette.bad)

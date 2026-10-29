@@ -151,16 +151,15 @@ struct GeneralSettingsView: View {
             Section {
                 LabeledContent("Notifications", value: notificationStatus)
                 Button("Open iPhone Settings") { SystemSettings.open() }
-                if !scheduler.alarmKitAvailable {
-                    Toggle("Keep WakeUp awake overnight", isOn: $model.data.prefs.keepAwakeInFallback)
-                        .onChange(of: model.data.prefs.keepAwakeInFallback) { _, _ in Task { await model.reschedule() } }
-                }
+                Toggle("Keep WakeUp awake overnight", isOn: $model.data.prefs.keepAwakeInFallback)
+                    .onChange(of: model.data.prefs.keepAwakeInFallback) { _, _ in Task { await model.reschedule() } }
             } header: {
                 Text("Notifications")
             } footer: {
-                Text(scheduler.alarmKitAvailable
+                Text((scheduler.alarmKitAvailable
                      ? "On iOS 26 WakeUp uses system alarms. Notifications are only a backup."
-                     : "Before iOS 26, WakeUp rings through notifications. Keeping WakeUp awake plays silent audio overnight so it can ring in full if you leave it open in the background. It uses some battery and stops if you swipe WakeUp away.")
+                     : "Before iOS 26, WakeUp rings through notifications.")
+                     + " When iOS won't schedule a system alarm, keeping WakeUp awake plays silent audio overnight so it can ring by itself. It uses some battery and stops if you swipe WakeUp away.")
             }
         }
         .wakeForm()
@@ -353,6 +352,7 @@ struct DiagnosticsView: View {
         case .off: model.data.alarm.enabled ? "Not scheduled" : "Alarm is off"
         case .checking: "Checking…"
         case .scheduled(let next, _): "Scheduled for \(TimeText.dayAndTime(next, format: model.data.prefs.timeFormat))"
+        case .inAppOnly(let next, _): "WakeUp rings by itself at \(TimeText.dayAndTime(next, format: model.data.prefs.timeFormat))"
         case .needsPermission: "Needs permission"
         case .failed: "Failed"
         }

@@ -17,6 +17,8 @@ enum ScheduleStatus: Equatable {
     case off
     case checking
     case scheduled(next: Date, backend: BackendKind)
+    /// iOS won't schedule anything, so WakeUp rings by itself while it stays running in the background.
+    case inAppOnly(next: Date, reason: String)
     case needsPermission(String)
     case failed(String)
 }
@@ -231,10 +233,10 @@ final class SchedulerService: ObservableObject {
         }
         guard let backend = await activeBackend(requestPermission: requestPermission) else {
             let message = alarmKitAvailable
-                ? "WakeUp isn't allowed to set alarms or send notifications, so nothing will ring. Allow Alarms for WakeUp in Settings."
-                : "Notifications are off for WakeUp, so the alarm can't ring while the app is closed. Turn them on in Settings."
-            status = .needsPermission(message)
-            return ScheduleOutcome(next: nil, backend: .none, error: message)
+                ? "iOS isn't letting WakeUp set a system alarm or send notifications (this is common for sideloaded apps)."
+                : "Notifications are off for WakeUp."
+            status = .inAppOnly(next: next, reason: message)
+            return ScheduleOutcome(next: next, backend: .none, error: message)
         }
         do {
             try await backend.schedule(config, id: primaryID, sound: sound)

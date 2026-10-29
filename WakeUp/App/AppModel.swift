@@ -129,7 +129,8 @@ final class AppModel: ObservableObject {
     private func armFallback(_ outcome: ScheduleOutcome) {
         fallbackTimer?.invalidate()
         fallbackTimer = nil
-        let fallback = outcome.backend == .notifications && data.alarm.enabled
+        // Anything short of a system alarm: WakeUp also rings by itself, kept alive by silent audio.
+        let fallback = outcome.backend != .alarmKit && data.alarm.enabled
         audio.setKeepAlive(fallback && data.prefs.keepAwakeInFallback)
         guard fallback, let next = outcome.next else { return }
         armTimer(at: next) { [weak self] in self?.startRinging(isTest: false, scheduledFor: next) }
