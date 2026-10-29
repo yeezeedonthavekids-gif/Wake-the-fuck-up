@@ -197,19 +197,26 @@ struct QRDestinationChallengeView: View {
 
 // MARK: - Squats and push-ups
 
+/// With the camera on (the default), a rep only counts when the camera sees it. Tapping to count
+/// is only used if camera checking is turned off for this step.
 struct RepChallengeView: View {
     let step: ChallengeStep
     let onDone: () -> Void
     @Environment(\.theme) private var theme
     @State private var reps = 0
     @State private var lastTap = Date.distantPast
-    @State private var useCamera = false
-    @State private var cameraReady = false
-    @State private var counter = RepCounter()
-    @State private var seesBody = false
+    @State private var cameraAllowed: Bool? = nil
+    @State private var counter: ExerciseRepCounter
     @State private var seatedAlternative = false
 
-    private var exercise: String { step.kind == .squats ? "squats" : "push-ups" }
+    init(step: ChallengeStep, onDone: @escaping () -> Void) {
+        self.step = step
+        self.onDone = onDone
+        _counter = State(initialValue: ExerciseRepCounter(step.kind == .squats ? .squat : .pushup))
+    }
+
+    private var isPushup: Bool { step.kind == .pushups }
+    private var exercise: String { isPushup ? "push-ups" : "squats" }
 
     var body: some View {
         if seatedAlternative {
@@ -219,56 +226,103 @@ struct RepChallengeView: View {
             }
         } else {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Do \(step.goal) comfortable \(exercise). Go at your own pace and stop if anything hurts.")
-                    .font(.subheadline).foregroundStyle(Palette.text2)
-                if useCamera && cameraReady {
-                    PoseCameraView { position in
-                        seesBody = true
-                        if counter.add(position) { add() }
-                    } onNoBody: {
-                        seesBody = false
-                    }
-                    .frame(height: 280)
-                    .clipShape(RoundedRectangle(cornerRadius: theme.smallRadius, style: .continuous))
-                    .overlay(alignment: .bottom) {
-                        Text(seesBody ? "Counting · \(reps) of \(step.goal)" : "Step back until your shoulders are in view")
-                            .font(.footnote.weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .padding(10)
-                    }
-                    Text("Experimental: counts are estimates from your shoulder position.")
-                        .font(.footnote).foregroundStyle(Palette.text3)
-                    Button("Count by tapping instead") { useCamera = false }.buttonStyle(SecondaryButtonStyle())
+                if step.cameraCounting {
+                    cameraMode
                 } else {
-                    ProgressRing(value: reps, total: step.goal, caption: "of \(step.goal) reps")
-                    Button("+1 rep", action: tapRep)
-                        .buttonStyle(PrimaryButtonStyle())
-                        .accessibilityHint("Tap once after each repetition")
-                    Text("Tap once after each rep. This trusts you.").font(.footnote).foregroundStyle(Palette.text3)
-                    if step.cameraCounting && CameraAccess.hasCamera {
-                        Button("Use camera counting (experimental)") { enableCamera() }.buttonStyle(SecondaryButtonStyle())
-                    }
+                    tapMode
                 }
                 Button("Low-movement alternative") { seatedAlternative = true }
                     .font(.subheadline)
                     .frame(maxWidth: .infinity)
             }
-            .onAppear { if step.cameraCounting { enableCamera() } }
         }
+    }
+
+    // MARK: Camera
+
+    @ViewBuilder private var cameraMode: some View {
+        switch cameraAllowed {
+        case .none:
+            ProgressView("Starting the camera…")
+                .frame(maxWidth: .infinity, minHeight: 120)
+                .task { cameraAllowed = await CameraAccess.request() }
+        case .some(false):
+            VStack(alignment: .leading, spacing: 10) {
+                Banner(text: CameraAccess.hasCamera
+                       ? "The camera is needed to confirm your \(exercise), but camera access is off for WakeUp."
+                       : "This device has no camera to confirm your \(exercise).",
+                       symbol: "camera.fill", tint: Palette.warn)
+                if CameraAccess.hasCamera {
+                    Button("Open Settings") { SystemSettings.open() }.buttonStyle(SecondaryButtonStyle())
+                }
+            }
+        case .some(true):
+            Text(setupText).font(.subheadline).foregroundStyle(Palette.text2)
+            PoseCameraView { frame in
+                if counter.add(frame) { add() }
+            }
+            .frame(height: 400)
+            .clipShape(RoundedRectangle(cornerRadius: theme.smallRadius, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                Text("\(reps)/\(step.goal)")
+                    .font(.system(size: 34, weight: .semibold, design: .rounded))
+                    .foregroundStyle(theme.accentInk)
+                    .padding(.horizontal, 14).padding(.vertical, 6)
+                    .background(theme.accent, in: Capsule())
+                    .padding(12)
+            }
+            .overlay(alignment: .bottom) {
+                Label(statusText, systemImage: statusSymbol)
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(12)
+            }
+            .accessibilityElement()
+            .accessibilityLabel("\(reps) of \(step.goal) \(exercise) confirmed. \(statusText)")
+            Text("Reps only count when the camera sees your \(isPushup ? "elbows bend and your body lower" : "knees bend and your hips lower"), then come back up. Everything is processed on this iPhone.")
+                .font(.footnote).foregroundStyle(Palette.text3)
+        }
+    }
+
+    private var setupText: String {
+        isPushup
+            ? "Prop your phone up on the floor 1–2 m away, side-on to you, so your shoulder, elbow, wrist and hip are in view. Then do \(step.goal) push-ups."
+            : "Stand the phone up 2 m away, side-on to you, so your whole body from shoulder to ankle is in view. Then do \(step.goal) squats."
+    }
+
+    private var statusText: String {
+        switch counter.status {
+        case .noBody: "Can't see you yet. Step into view."
+        case .getInPosition: isPushup ? "Turn side-on so your arm and hip are visible" : "Turn side-on so your hip, knee and ankle are visible"
+        case .up: reps == 0 ? "Ready. Go down." : "Up. Go down again."
+        case .down: "Down. Now push back up."
+        }
+    }
+
+    private var statusSymbol: String {
+        switch counter.status {
+        case .noBody, .getInPosition: "viewfinder"
+        case .up: "arrow.down"
+        case .down: "arrow.up"
+        }
+    }
+
+    // MARK: Tap counting (only when camera checking is off)
+
+    @ViewBuilder private var tapMode: some View {
+        Text("Do \(step.goal) comfortable \(exercise). Tap once after each rep. This trusts you.")
+            .font(.subheadline).foregroundStyle(Palette.text2)
+        ProgressRing(value: reps, total: step.goal, caption: "of \(step.goal) reps")
+        Button("+1 rep", action: tapRep)
+            .buttonStyle(PrimaryButtonStyle())
+            .accessibilityHint("Tap once after each repetition")
     }
 
     private var memoryStep: ChallengeStep {
         var s = ChallengeStep(kind: .memory, difficulty: step.difficulty)
         s.goal = 5
         return s
-    }
-
-    private func enableCamera() {
-        Task {
-            cameraReady = await CameraAccess.request()
-            useCamera = cameraReady
-        }
     }
 
     private func tapRep() {
@@ -281,11 +335,8 @@ struct RepChallengeView: View {
     private func add() {
         guard reps < step.goal else { return }
         reps += 1
-        Haptics.tap()
-        if reps >= step.goal {
-            Haptics.success()
-            onDone()
-        }
+        Haptics.success()
+        if reps >= step.goal { onDone() }
     }
 }
 

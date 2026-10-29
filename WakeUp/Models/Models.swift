@@ -141,7 +141,7 @@ enum ChallengeKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .qrDestination: "Camera"
         case .findItem: "Camera (some modes)"
-        case .squats, .pushups: "Camera (optional)"
+        case .squats, .pushups: "Camera"
         case .eyesOpen: "Camera, Face ID iPhone"
         default: nil
         }
@@ -218,7 +218,7 @@ enum ChallengeKind: String, Codable, CaseIterable, Identifiable {
         case .tapSequence, .matching: "Checks that you tapped the right things. A quick, low-movement option."
         case .findItem: FindMode.randomTarget.explanation
         case .qrDestination: "Scanning confirms you reached the code, not that you finished your morning routine."
-        case .squats, .pushups: "Manual counting trusts you. Camera counting is experimental: it estimates reps from your shoulder position and isn't medically accurate. Stop if anything hurts."
+        case .squats, .pushups: "The camera confirms each rep by checking that your joint bends and your body really lowers, then comes back up. It's processed on your iPhone and isn't a medical measurement. Stop if anything hurts."
         case .eyesOpen: "Needs a Face ID camera. It checks that your eyes are open, not that you're alert."
         }
     }
@@ -239,6 +239,7 @@ struct ChallengeStep: Codable, Identifiable, Equatable, Hashable {
         self.kind = kind
         self.difficulty = difficulty
         goal = kind.defaultGoal(difficulty)
+        cameraCounting = kind.isPhysical
     }
 
     var label: String {

@@ -206,23 +206,64 @@ final class GeneratorTests: XCTestCase {
     }
 }
 
-final class RepCounterTests: XCTestCase {
-    func testCountsSmoothRepetitions() {
-        var counter = RepCounter()
-        var completed = 0
-        for i in 0..<(5 * 40) {
-            let position = 0.5 + 0.2 * cos(Double(i) / 40 * 2 * .pi)
-            if counter.add(position) { completed += 1 }
-        }
-        XCTAssertEqual(completed, 5)
-        XCTAssertEqual(counter.reps, 5)
+final class ExerciseRepCounterTests: XCTestCase {
+    /// A side-view push-up: arm straight at the top, bent at the bottom, shoulders lowering.
+    private func pushupFrame(_ t: Double) -> PoseFrame {
+        // t from 0 (top) to 1 (bottom)
+        let shoulder = CGPoint(x: 0.5, y: 0.6 - 0.15 * t)
+        let wrist = CGPoint(x: 0.5, y: 0.3)
+        let elbowAngle = (175 - 105 * t) * .pi / 180 // 175° to 70°
+        let half = elbowAngle / 2
+        let upper = (shoulder.y - wrist.y) / (2 * sin(half))
+        let elbow = CGPoint(x: 0.5 + upper * cos(half), y: (shoulder.y + wrist.y) / 2)
+        return PoseFrame(shoulder: shoulder, elbow: elbow, wrist: wrist, hip: CGPoint(x: 0.9, y: shoulder.y - 0.02))
     }
 
-    func testIgnoresSmallJitter() {
-        var counter = RepCounter()
-        var g = SeededGenerator(seed: 7)
-        for _ in 0..<500 { _ = counter.add(0.5 + Double.random(in: -0.02...0.02, using: &g)) }
+    func testCountsRealPushups() {
+        var counter = ExerciseRepCounter(.pushup)
+        var counted = 0
+        for _ in 0..<5 {
+            for i in 0...20 { if counter.add(pushupFrame(Double(i) / 20)) { counted += 1 } }
+            for i in (0...20).reversed() { if counter.add(pushupFrame(Double(i) / 20)) { counted += 1 } }
+        }
+        XCTAssertEqual(counted, 5)
+    }
+
+    func testIgnoresBendingArmsWithoutLowering() {
+        var counter = ExerciseRepCounter(.pushup)
+        for _ in 0..<5 {
+            for i in Array(0...20) + Array((0...20).reversed()) {
+                var frame = pushupFrame(Double(i) / 20)
+                // Same arm bend, but the shoulder stays put (like arm curls standing up).
+                let shift = 0.6 - frame.shoulder!.y
+                frame.shoulder!.y += shift
+                frame.elbow!.y += shift
+                frame.wrist!.y += shift
+                frame.hip!.y += shift
+                _ = counter.add(frame)
+            }
+        }
         XCTAssertEqual(counter.reps, 0)
+    }
+
+    func testHalfRepsDontCount() {
+        var counter = ExerciseRepCounter(.pushup)
+        for _ in 0..<5 {
+            for i in Array(0...8) + Array((0...8).reversed()) { _ = counter.add(pushupFrame(Double(i) / 20)) }
+        }
+        XCTAssertEqual(counter.reps, 0)
+    }
+
+    func testNoBodyNoReps() {
+        var counter = ExerciseRepCounter(.squat)
+        for _ in 0..<50 { _ = counter.add(PoseFrame()) }
+        XCTAssertEqual(counter.reps, 0)
+        XCTAssertEqual(counter.status, .noBody)
+    }
+
+    func testAngle() {
+        XCTAssertEqual(ExerciseRepCounter.angle(CGPoint(x: 0, y: 1), .zero, CGPoint(x: 1, y: 0)), 90, accuracy: 0.001)
+        XCTAssertEqual(ExerciseRepCounter.angle(CGPoint(x: -1, y: 0), .zero, CGPoint(x: 1, y: 0)), 180, accuracy: 0.001)
     }
 }
 

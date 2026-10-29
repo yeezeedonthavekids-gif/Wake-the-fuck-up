@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Deterministic generator for tests. The app itself uses SystemRandomNumberGenerator.
@@ -245,36 +246,88 @@ enum MatchingGenerator {
 
 // MARK: - Rep counting
 
-/// Counts squats or push-ups from a stream of normalized vertical positions (0 is the bottom
-/// of the camera frame, 1 the top). A rep is a fall of at least `minimumTravel` followed by a
-/// rise back most of the way. It's an estimate, not a medical measurement.
-struct RepCounter {
+/// One camera frame's joints for the side of the body the camera sees best.
+/// Coordinates are normalized with y pointing up, from an upright image.
+struct PoseFrame {
+    var shoulder: CGPoint?
+    var elbow: CGPoint?
+    var wrist: CGPoint?
+    var hip: CGPoint?
+    var knee: CGPoint?
+    var ankle: CGPoint?
+}
+
+/// Confirms push-ups or squats from body-pose frames. A rep only counts when the joint bends
+/// past the bottom angle and straightens again, and the body really moves down while doing it,
+/// so bending your arms while standing doesn't count as a push-up.
+struct ExerciseRepCounter {
+    enum Exercise { case pushup, squat }
+    enum Status: Equatable { case noBody, getInPosition, up, down }
+
+    let exercise: Exercise
     private(set) var reps = 0
-    let minimumTravel: Double
-    private var smoothed: Double?
-    private var high = -Double.infinity
-    private var low = Double.infinity
+    private(set) var status = Status.noBody
+    private(set) var angle: Double?
     private var goingDown = false
+    private var top: Double?
+    private var bottom = Double.infinity
 
-    init(minimumTravel: Double = 0.08) { self.minimumTravel = minimumTravel }
+    /// Bottom and top joint angles in degrees, and the drop needed as a share of torso length.
+    var bendBelow: Double { exercise == .pushup ? 100 : 110 }
+    var straightAbove: Double { exercise == .pushup ? 150 : 155 }
+    let minimumDrop = 0.2
 
-    /// Returns true when a repetition completes.
-    mutating func add(_ position: Double) -> Bool {
-        let value = smoothed.map { $0 * 0.6 + position * 0.4 } ?? position
-        smoothed = value
+    init(_ exercise: Exercise) { self.exercise = exercise }
+
+    static func angle(_ a: CGPoint, _ vertex: CGPoint, _ c: CGPoint) -> Double {
+        let v1 = CGVector(dx: a.x - vertex.x, dy: a.y - vertex.y)
+        let v2 = CGVector(dx: c.x - vertex.x, dy: c.y - vertex.y)
+        let dot = v1.dx * v2.dx + v1.dy * v2.dy
+        let lengths = hypot(v1.dx, v1.dy) * hypot(v2.dx, v2.dy)
+        guard lengths > 0 else { return 180 }
+        return acos(max(-1, min(1, dot / lengths))) * 180 / .pi
+    }
+
+    /// Returns true when a confirmed repetition completes.
+    mutating func add(_ frame: PoseFrame) -> Bool {
+        let joints: (CGPoint?, CGPoint?, CGPoint?, CGPoint?) = exercise == .pushup
+            ? (frame.shoulder, frame.elbow, frame.wrist, frame.shoulder)
+            : (frame.hip, frame.knee, frame.ankle, frame.hip)
+        guard let a = joints.0, let vertex = joints.1, let c = joints.2, let moving = joints.3,
+              let shoulder = frame.shoulder, let hip = frame.hip else {
+            status = frame.shoulder == nil && frame.hip == nil ? .noBody : .getInPosition
+            angle = nil
+            return false
+        }
+        let torso = hypot(shoulder.x - hip.x, shoulder.y - hip.y)
+        guard torso > 0.05 else {
+            status = .getInPosition
+            return false
+        }
+        let bend = Self.angle(a, vertex, c)
+        angle = bend
+        let height = Double(moving.y)
+
         if goingDown {
-            low = min(low, value)
-            if high - low >= minimumTravel, value >= low + (high - low) * 0.6 {
-                reps += 1
+            bottom = min(bottom, height)
+            if bend > straightAbove {
                 goingDown = false
-                high = value
-                return true
+                status = .up
+                let dropped = ((top ?? height) - bottom) / Double(torso)
+                top = height
+                if dropped >= minimumDrop {
+                    reps += 1
+                    return true
+                }
             }
         } else {
-            high = max(high, value)
-            if value <= high - minimumTravel {
+            if bend > straightAbove {
+                top = max(top ?? height, height)
+                status = .up
+            } else if bend < bendBelow, top != nil {
                 goingDown = true
-                low = value
+                bottom = height
+                status = .down
             }
         }
         return false

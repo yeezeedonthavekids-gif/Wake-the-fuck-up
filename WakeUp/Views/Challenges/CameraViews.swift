@@ -160,15 +160,13 @@ struct CameraPhotoPicker: UIViewControllerRepresentable {
 
 // MARK: - Pose camera
 
-/// Front camera preview that feeds shoulder height to a callback. Stops the camera when it disappears.
+/// Front camera preview that feeds body-pose frames to a callback. Stops the camera when it disappears.
 struct PoseCameraView: UIViewControllerRepresentable {
-    let onPosition: (Double) -> Void
-    let onNoBody: () -> Void
+    let onFrame: (PoseFrame) -> Void
 
     func makeUIViewController(context: Context) -> PoseCameraController {
         let controller = PoseCameraController()
-        controller.processor.onPosition = onPosition
-        controller.processor.onNoBody = onNoBody
+        controller.processor.onFrame = onFrame
         return controller
     }
 
@@ -194,6 +192,10 @@ final class PoseCameraController: UIViewController {
         output.setSampleBufferDelegate(processor, queue: queue)
         guard session.canAddOutput(output) else { return }
         session.addOutput(output)
+        // Deliver upright portrait frames so "down" in the image is down in the room.
+        if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(90) {
+            connection.videoRotationAngle = 90
+        }
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
         view.layer.addSublayer(layer)

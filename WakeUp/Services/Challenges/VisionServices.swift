@@ -38,32 +38,33 @@ enum ItemRecognizer {
     }
 }
 
-/// Reads frames from the front camera and reports the average height of the neck and shoulders.
-/// Runs Vision's body-pose detection about 10 times a second on a background queue.
+/// Reads upright frames from the front camera and reports the joints of the side of the body
+/// the camera sees best. Runs Vision's body-pose detection about 12 times a second, on-device.
 final class PoseProcessor: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-    var onPosition: ((Double) -> Void)?
-    var onNoBody: (() -> Void)?
+    var onFrame: ((PoseFrame) -> Void)?
     private var lastRun = Date.distantPast
+
+    private static let left: [VNHumanBodyPoseObservation.JointName] = [.leftShoulder, .leftElbow, .leftWrist, .leftHip, .leftKnee, .leftAnkle]
+    private static let right: [VNHumanBodyPoseObservation.JointName] = [.rightShoulder, .rightElbow, .rightWrist, .rightHip, .rightKnee, .rightAnkle]
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         let now = Date()
-        guard now.timeIntervalSince(lastRun) > 0.1 else { return }
+        guard now.timeIntervalSince(lastRun) > 0.08 else { return }
         lastRun = now
         let request = VNDetectHumanBodyPoseRequest()
-        let handler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, orientation: .leftMirrored, options: [:])
-        try? handler.perform([request])
-        guard let body = request.results?.first,
-              let points = try? body.recognizedPoints(.torso) else {
-            DispatchQueue.main.async { [weak self] in self?.onNoBody?() }
-            return
+        try? VNImageRequestHandler(cmSampleBuffer: sampleBuffer, orientation: .up, options: [:]).perform([request])
+        var frame = PoseFrame()
+        if let body = request.results?.first, let points = try? body.recognizedPoints(.all) {
+            let score: ([VNHumanBodyPoseObservation.JointName]) -> Float = { names in
+                names.reduce(0) { $0 + (points[$1]?.confidence ?? 0) }
+            }
+            let side = score(Self.left) >= score(Self.right) ? Self.left : Self.right
+            let joint: (Int) -> CGPoint? = { index in
+                guard let point = points[side[index]], point.confidence > 0.3 else { return nil }
+                return point.location
+            }
+            frame = PoseFrame(shoulder: joint(0), elbow: joint(1), wrist: joint(2), hip: joint(3), knee: joint(4), ankle: joint(5))
         }
-        let joints: [VNHumanBodyPoseObservation.JointName] = [.neck, .leftShoulder, .rightShoulder]
-        let heights = joints.compactMap { points[$0] }.filter { $0.confidence > 0.3 }.map { Double($0.location.y) }
-        guard !heights.isEmpty else {
-            DispatchQueue.main.async { [weak self] in self?.onNoBody?() }
-            return
-        }
-        let average = heights.reduce(0, +) / Double(heights.count)
-        DispatchQueue.main.async { [weak self] in self?.onPosition?(average) }
+        DispatchQueue.main.async { [weak self] in self?.onFrame?(frame) }
     }
 }
